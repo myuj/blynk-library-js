@@ -8,6 +8,20 @@ var path = require('path');
 
 var default_certs_path = path.join(__dirname, "certs");
 
+
+exports.ab2str = function (buffer) {
+  if (buffer.byteLength == 0) {
+    return '';
+  }
+  var TextDecoder = util.TextDecoder;
+  return new TextDecoder().decode(buffer);
+};
+
+exports.str2ab = function (str) {
+  var TextEncoder = util.TextEncoder;
+  return new TextEncoder().encode(str).buffer;
+};
+
 /*
 * TCP Client
 */
@@ -28,7 +42,7 @@ exports.TcpClient = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(data, 'binary');
+      self.sock.write(new Uint8Array(data));
     }
   };
 
@@ -39,7 +53,6 @@ exports.TcpClient = function(options) {
     console.log("Connecting to TCP:", self.addr, self.port);
     self.sock = new net.Socket();
     self.sock.setNoDelay(true);
-    self.sock.setEncoding('binary');
     self.sock.connect({
       host: self.addr,
       family: 4,
@@ -47,7 +60,7 @@ exports.TcpClient = function(options) {
     }, function() {
       console.log('Connected');
       self.sock.on('data', function(data) {
-        self.emit('data', data);
+        self.emit('data', data.buffer);
       });
       self.sock.on('end', function(data) {
         self.emit('end', data);
@@ -84,7 +97,7 @@ exports.TcpServer = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(data, 'binary');
+      self.sock.write(new Uint8Array(data));
     }
   };
 
@@ -97,9 +110,8 @@ exports.TcpServer = function(options) {
       self.sock = conn;
       console.log('Connected');
       self.sock.setNoDelay(true);
-      self.sock.setEncoding('binary');
       self.sock.on('data', function(data) {
-        self.emit('data', data);
+        self.emit('data', data.buffer);
       });
       self.sock.on('end', function() {
         self.emit('end');
@@ -147,7 +159,8 @@ exports.SslClient = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(data, 'binary');
+      // self.sock.write(data, 'binary');
+      self.sock.write(new Uint8Array(data));
     }
   };
 
@@ -207,9 +220,8 @@ exports.SslClient = function(options) {
         }
         console.log('Connected');
         self.sock.setNoDelay(true);
-        self.sock.setEncoding('binary');
         self.sock.on('data', function(data) {
-          self.emit('data', data);
+          self.emit('data', data.buffer);
         });
         self.sock.on('end', function(data) {
           self.emit('end', data);
@@ -256,7 +268,7 @@ exports.SslServer = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(data, 'binary');
+      self.sock.write(new Uint8Array(data));
     }
   };
 
@@ -276,9 +288,8 @@ exports.SslServer = function(options) {
       self.sock = conn;
       console.log(self.sock.authorized ? 'Authorized' : 'Unauthorized');
       self.sock.setNoDelay(true);
-      self.sock.setEncoding('binary');
       self.sock.on('data', function(data) {
-        self.emit('data', data);
+        self.emit('data', data.buffer);
       });
       self.sock.on('end', function() {
         self.emit('end');
