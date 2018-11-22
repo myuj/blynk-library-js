@@ -42,7 +42,7 @@ exports.TcpClient = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(new Uint8Array(data));
+      self.sock.write(Buffer.from(data));
     }
   };
 
@@ -97,7 +97,7 @@ exports.TcpServer = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(new Uint8Array(data));
+      self.sock.write(Buffer.from(data));
     }
   };
 
@@ -160,7 +160,7 @@ exports.SslClient = function(options) {
   this.write = function(data) {
     if (self.sock) {
       // self.sock.write(data, 'binary');
-      self.sock.write(new Uint8Array(data));
+      self.sock.write(Buffer.from(data));
     }
   };
 
@@ -268,7 +268,7 @@ exports.SslServer = function(options) {
 
   this.write = function(data) {
     if (self.sock) {
-      self.sock.write(new Uint8Array(data));
+      self.sock.write(Buffer.from(data));
     }
   };
 
