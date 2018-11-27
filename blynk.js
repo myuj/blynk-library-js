@@ -32,13 +32,62 @@ function needsEmitter() {
   return isNode();
 }
 
+// This is replaced to support utf-8 in node.js env.
+function ab2str(buf) {
+  return String.fromCharCode.apply(null, new Uint8Array(buf));
+}
+
+// This is replaced to support utf-8 in node.js env.
+function str2ab(str) {
+  var buf = new ArrayBuffer(str.length); // 2 bytes for each char
+  var bufView = new Uint8Array(buf);
+  for (var i=0, strLen=str.length; i < strLen; i++) {
+    bufView[i] = str.charCodeAt(i);
+  }
+  return buf;
+}
+
+function decodeValues(buf) {
+  var values = [];
+  var index = 0;
+  while ((index = new Uint8Array(buf).indexOf(0)) !== -1) {
+    values.push(buf.slice(0, index));
+    buf = buf.slice(index + 1);
+}
+  values.push(buf);
+  return values.map(ab2str);
+}
+
+function encodeValues(values) {
+  var buf = new ArrayBuffer();;
+  values.forEach(function (v) {
+    if (buf.byteLength !== 0) {
+      buf = mergeBuffer(buf, new Uint8Array([0]).buffer);
+    }
+    buf = mergeBuffer(buf, str2ab('' + v));
+  });
+  return buf;
+}
+
+function mergeBuffer(buf1, buf2) {
+  if(buf1.byteLength === 0){
+    return buf2;
+  }
+  if(buf2.byteLength === 0){
+    return buf1;
+  }
+  var tmp = new Uint8Array(buf1.byteLength + buf2.byteLength);
+  tmp.set(new Uint8Array(buf1), 0);
+  tmp.set(new Uint8Array(buf2), buf1.byteLength);
+  return tmp.buffer;
+}
 
 function blynkHeader(msg_type, msg_id, msg_len) {
-  return String.fromCharCode(
+  return new Uint8Array([
     msg_type,
-    msg_id  >> 8, msg_id  & 0xFF,
+    msg_id >> 8, msg_id & 0xFF,
     msg_len >> 8, msg_len & 0xFF
-  );
+  ]).buffer;
 }
 
 var MsgType = {
@@ -89,6 +138,8 @@ if (isBrowser()) {
   var bl_node = require('./blynk-node.js');
   var events = require('events');
   var util = require('util');
+  ab2str = bl_node.ab2str;
+  str2ab = bl_node.str2ab;
 }
 
 /*
@@ -312,7 +363,7 @@ var Blynk = function(auth, options) {
     this.conn = new bl_node.SslClient(options);
   }
 
-  this.buff_in = '';
+  this.buff_in = new Uint8Array();;
   this.msg_id = 1;
   this.vpins = [];
   this.profile = options.profile;
@@ -441,11 +492,11 @@ if (needsEmitter()) {
 
 Blynk.prototype.onReceive = function(data) {
   var self = this;
-  self.buff_in += data;
-  while (self.buff_in.length >= 5) {
-    var msg_type = self.buff_in.charCodeAt(0);
-    var msg_id   = self.buff_in.charCodeAt(1) << 8 | self.buff_in.charCodeAt(2);
-    var msg_len  = self.buff_in.charCodeAt(3) << 8 | self.buff_in.charCodeAt(4);
+  self.buff_in = new Uint8Array(mergeBuffer(self.buff_in.buffer, data));
+  while (self.buff_in.byteLength >= 5) {
+    var msg_type = self.buff_in[0];
+    var msg_id   = self.buff_in[1] << 8 | self.buff_in[2];
+    var msg_len  = self.buff_in[3] << 8 | self.buff_in[4];
 
     if (msg_id === 0)  { return self.disconnect(); }
 
@@ -457,7 +508,7 @@ Blynk.prototype.onReceive = function(data) {
             clearInterval(self.timerConn);
             self.timerConn = null;
             self.timerHb = setInterval(function() {
-              //console.log('Heartbeat');
+              console.log('Heartbeat');
               self.sendMsg(MsgType.PING);
             }, self.heartbeat);
             console.log('Authorized');
@@ -469,7 +520,7 @@ Blynk.prototype.onReceive = function(data) {
             if (msg_len === MsgStatus.INVALID_TOKEN) {
               //letting main app know why we failed
               self.emit('error', string_of_enum(MsgStatus, msg_len));
-              //console.log('Disconnecting because of invalid token');
+              console.log('Disconnecting because of invalid token');
               self.disconnect();
               if(self.timerConn) {
                 //clear connecting timer
@@ -481,16 +532,17 @@ Blynk.prototype.onReceive = function(data) {
           }
         }
       }
-      self.buff_in = self.buff_in.substr(5);
+      self.buff_in = self.buff_in.slice(5);
       continue;
     }
 
     if (msg_len > 4096)  { return self.disconnect(); }
-    if (self.buff_in.length < msg_len+5) {
+    if (self.buff_in.byteLength < msg_len+5) {
       return;
     }
-    var values = self.buff_in.substr(5, msg_len).split('\0');
-    self.buff_in = self.buff_in.substr(msg_len+5);
+
+    var values = decodeValues(self.buff_in.slice(5, msg_len + 5));
+    self.buff_in = self.buff_in.slice(msg_len + 5);
 
     /*if (msg_len) {
       console.log('> ', string_of_enum(MsgType, msg_type), msg_id, msg_len, values.join('|'));
@@ -503,9 +555,9 @@ Blynk.prototype.onReceive = function(data) {
     {
       self.sendRsp(MsgType.RSP, msg_id, MsgStatus.OK);
     } else if (msg_type === MsgType.GET_TOKEN) {
-      self.sendRsp(MsgType.GET_TOKEN, msg_id, self.auth.length, self.auth);
+      self.sendRsp(MsgType.GET_TOKEN, msg_id, self.auth);
     } else if (msg_type === MsgType.LOAD_PROF) {
-      self.sendRsp(MsgType.LOAD_PROF, msg_id, self.profile.length, self.profile);
+      self.sendRsp(MsgType.LOAD_PROF, msg_id, self.profile);
     } else if (msg_type === MsgType.HW ||
                msg_type === MsgType.BRIDGE)
     {
@@ -544,14 +596,14 @@ Blynk.prototype.onReceive = function(data) {
       // these make no sense...
     } else {
       console.log('Invalid msg type: ', msg_type);
-      self.sendRsp(MsgType.RSP, msg_id, MsgStatus.ILLEGAL_COMMAND);
+      self.sendRspStatus(MsgType.RSP, msg_id, MsgStatus.ILLEGAL_COMMAND);
     }
   } // end while
 };
 
-Blynk.prototype.sendRsp = function(msg_type, msg_id, msg_len, data) {
+Blynk.prototype.send = function(msg_type, msg_id, status_or_msg_len, data) {
   var self = this;
-  data = data || "";
+  data = data || new ArrayBuffer();
 
   if (!msg_id) {
     if (self.msg_id === 0xFFFF)
@@ -562,19 +614,20 @@ Blynk.prototype.sendRsp = function(msg_type, msg_id, msg_len, data) {
     msg_id = self.msg_id;
   }
 
+  var header = blynkHeader(msg_type, msg_id, status_or_msg_len);
   if (msg_type == MsgType.RSP) {
-    //console.log('< ', string_of_enum(MsgType, msg_type), msg_id, string_of_enum(MsgStatus, msg_len));
-    data = blynkHeader(msg_type, msg_id, msg_len)
+    // console.log('< ', string_of_enum(MsgType, msg_type), msg_id, string_of_enum(MsgStatus, status_or_msg_len));
+    data = header;
   } else {
-    /*if (msg_len) {
-      console.log('< ', string_of_enum(MsgType, msg_type), msg_id, msg_len, data.split('\0').join('|'));
+    /*if (status_or_msg_len) {
+      console.log('< ', string_of_enum(MsgType, msg_type), msg_id, status_or_msg_len, decodeValues(data).join('|'));
     } else {
-      console.log('< ', string_of_enum(MsgType, msg_type), msg_id, msg_len);
+      console.log('< ', string_of_enum(MsgType, msg_type), msg_id, status_or_msg_len);
     }*/
-    data = blynkHeader(msg_type, msg_id, msg_len) + data;
+    data = mergeBuffer(header, data);
   }
 
-  self.conn.write(data)
+  self.conn.write(data);
 
   // TODO: track also recieving time
   /*if (!self.profile) {
@@ -588,11 +641,26 @@ Blynk.prototype.sendRsp = function(msg_type, msg_id, msg_len, data) {
   }*/
 };
 
+Blynk.prototype.sendRsp = function(msg_type, msg_id, status_or_data) {
+  if (typeof status_or_data === 'string') {
+    var data = str2ab('' + status_or_data);
+    this.send(msg_type, msg_id, data.byteLength, data);
+  } else {
+    this.send(msg_type, msg_id, status_or_data);
+  }
+};
+
 Blynk.prototype.sendMsg = function(msg_type, values, msg_id) {
   if (this.timerHb) {
-    var values = values || [''];
-    var data = values.join('\0');
-    this.sendRsp(msg_type, msg_id, data.length, data);
+    var data = values || [''];
+    if (data instanceof Array) {
+      data = encodeValues(data);
+    } else if (data !== null) {
+      data = str2ab(data);
+    } else {
+      data = new ArrayBuffer();
+    }
+    this.send(msg_type, msg_id, data.byteLength, data);
   }
 };
 
@@ -612,7 +680,7 @@ Blynk.prototype.connect = function() {
       self.conn.on('data', function(data) { self.onReceive(data);     });
       self.conn.on('end',  function()     { self.end();               });
 
-      self.sendRsp(MsgType.LOGIN, 1, self.auth.length, self.auth);
+      self.sendRsp(MsgType.LOGIN, 1, self.auth);
     });
     self.conn.on('error', function(err) { self.error(err);            });
   };
